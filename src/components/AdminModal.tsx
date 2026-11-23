@@ -10,7 +10,9 @@ import {
   FileText,
   Phone,
   ShoppingBag,
-  LogOut
+  LogOut,
+  Database,
+  Copy
 } from 'lucide-react';
 import { MenuItem, SiteSettings, OrderRecord } from '../types';
 import { formatRupiah } from '../utils/formatters';
@@ -19,8 +21,11 @@ import {
   deleteMenuItem,
   updateSiteSettings,
   fetchOrders,
-  updateOrderStatus
+  updateOrderStatus,
+  getStoredSupabaseConfig,
+  saveStoredSupabaseConfig
 } from '../lib/supabase';
+import { ImageUploader } from './ImageUploader';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -183,7 +188,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="admin"
+                  placeholder="Masukkan username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#143826]/20 focus:border-[#143826]"
@@ -197,7 +202,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <input
                   type="password"
                   required
-                  placeholder="admin123"
+                  placeholder="Masukkan password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#143826]/20 focus:border-[#143826]"
@@ -475,20 +480,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             />
                           </div>
 
-                          <div>
-                            <label className="text-xs font-semibold text-gray-700 block mb-1">
-                              URL Foto Produk
-                            </label>
-                            <input
-                              type="url"
-                              required
-                              value={editingItem.image}
-                              onChange={(e) =>
-                                setEditingItem({ ...editingItem, image: e.target.value })
-                              }
-                              className="w-full px-3 py-2 border rounded-xl text-sm"
-                            />
-                          </div>
+                          <ImageUploader
+                            label="Foto Produk"
+                            currentUrl={editingItem.image}
+                            onUrlChange={(url) => setEditingItem({ ...editingItem, image: url })}
+                            folderPath="menu"
+                            required
+                          />
 
                           <div className="grid grid-cols-2 gap-3 items-center">
                             <div>
@@ -647,22 +645,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         />
                       </div>
 
-                      <div>
-                        <label className="text-xs font-semibold text-gray-700 block mb-1">
-                          URL Foto Utama Hero
-                        </label>
-                        <input
-                          type="url"
-                          value={settingsForm.heroImage}
-                          onChange={(e) =>
-                            setSettingsForm({
-                              ...settingsForm,
-                              heroImage: e.target.value
-                            })
-                          }
-                          className="w-full px-3 py-2 border rounded-xl text-sm"
-                        />
-                      </div>
+                      <ImageUploader
+                        label="Foto Utama Hero"
+                        currentUrl={settingsForm.heroImage}
+                        onUrlChange={(url) => setSettingsForm({ ...settingsForm, heroImage: url })}
+                        folderPath="hero"
+                      />
                     </div>
 
                     <div className="pt-4 flex justify-end">
@@ -751,39 +739,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-semibold text-gray-700 block mb-1">
-                          Foto Dokumentasi 1
-                        </label>
-                        <input
-                          type="url"
-                          value={settingsForm.aboutImage1}
-                          onChange={(e) =>
-                            setSettingsForm({
-                              ...settingsForm,
-                              aboutImage1: e.target.value
-                            })
-                          }
-                          className="w-full px-3 py-2 border rounded-xl text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-gray-700 block mb-1">
-                          Foto Dokumentasi 2
-                        </label>
-                        <input
-                          type="url"
-                          value={settingsForm.aboutImage2}
-                          onChange={(e) =>
-                            setSettingsForm({
-                              ...settingsForm,
-                              aboutImage2: e.target.value
-                            })
-                          }
-                          className="w-full px-3 py-2 border rounded-xl text-sm"
-                        />
-                      </div>
+                      <ImageUploader
+                        label="Foto Dokumentasi 1"
+                        currentUrl={settingsForm.aboutImage1}
+                        onUrlChange={(url) => setSettingsForm({ ...settingsForm, aboutImage1: url })}
+                        folderPath="about"
+                      />
+                      <ImageUploader
+                        label="Foto Dokumentasi 2"
+                        currentUrl={settingsForm.aboutImage2}
+                        onUrlChange={(url) => setSettingsForm({ ...settingsForm, aboutImage2: url })}
+                        folderPath="about"
+                      />
                     </div>
 
                     <div className="pt-4 flex justify-end">
