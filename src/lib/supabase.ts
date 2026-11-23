@@ -13,6 +13,10 @@ export interface SupabaseConfig {
 
 // ─── KONFIGURASI SUPABASE ────────────────────────────────────────────────────
 
+// Default Supabase Project Credentials (agar HP, tablet, dan perangkat user lain langsung tersambung otomatis)
+const DEFAULT_SUPABASE_URL = 'https://xasrmlojmpyuczucakqf.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_svB5t9Hi4-TlWUoNbEmZOA_VPQit2MO';
+
 function isValidAnonKey(key: string): boolean {
   if (!key || key.startsWith('http')) return false;
   return key.startsWith('eyJ') || key.startsWith('sb_') || key.length > 20;
@@ -46,7 +50,11 @@ export function getStoredSupabaseConfig(): SupabaseConfig {
     console.error('Error reading supabase config from storage', e);
   }
 
-  return { url: envUrl, anonKey: envKey };
+  // Prioritas 3: Default Project Credentials (otomatis dipakai untuk HP, tablet, dan hosting seperti Vercel/Netlify)
+  return {
+    url: envUrl || DEFAULT_SUPABASE_URL,
+    anonKey: (envKey && isValidAnonKey(envKey)) ? envKey : DEFAULT_SUPABASE_ANON_KEY
+  };
 }
 
 function normalizeUrl(url: string): string {
