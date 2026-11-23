@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MenuItem, SiteSettings, CartItem } from './types';
 import { initialMenuItems, initialSiteSettings } from './data/initialData';
-import { fetchMenuItems, fetchSiteSettings } from './lib/supabase';
+import {
+  fetchMenuItems,
+  fetchSiteSettings,
+  isSupabaseReady,
+  subscribeToChanges,
+  unsubscribe
+} from './lib/supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { FeaturesBar } from './components/FeaturesBar';
@@ -31,35 +38,60 @@ export const App: React.FC = () => {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [supabaseConnected, setSupabaseConnected] = useState(false);
 
-  // Sync cart to localStorage whenever it changes
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+
+  // ─── Simpan cart ke localStorage ─────────────────────────────────────
   useEffect(() => {
     try {
       localStorage.setItem(LOCAL_STORAGE_CART_KEY, JSON.stringify(cart));
-    } catch (e) {
-      console.error('Failed to save cart to localStorage', e);
-    }
+    } catch {}
   }, [cart]);
 
-  // Load data on start
-  const loadData = async () => {
-    try {
-      const [settings, items] = await Promise.all([
-        fetchSiteSettings(),
-        fetchMenuItems()
-      ]);
-      setSiteSettings(settings);
-      setMenuItems(items);
-    } catch (err) {
-      console.error('Error loading data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // ─── Load data dari Supabase ──────────────────────────────────────────
+  const loadSettings = useCallback(async () => {
+    const settings = await fetchSiteSettings();
+    setSiteSettings(settings);
+  }, []);
 
+  const loadMenu = useCallback(async () => {
+    const items = await fetchMenuItems();
+    setMenuItems(items);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    await Promise.all([loadSettings(), loadMenu()]);
+    setIsLoading(false);
+    setSupabaseConnected(isSupabaseReady());
+  }, [loadSettings, loadMenu]);
+
+  // ─── Mount: load data + pasang Realtime subscription ─────────────────
   useEffect(() => {
     loadData();
+
+    // Pasang realtime listener agar halaman user lain ikut update otomatis
+    const channel = subscribeToChanges(
+      () => loadMenu(),      // triggered saat ada perubahan menu_items
+      () => loadSettings()   // triggered saat ada perubahan site_settings
+    );
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      unsubscribe(realtimeChannelRef.current);
+    };
   }, []);
+
+  // ─── Pasang ulang realtime setelah config Supabase diganti admin ──────
+  const handleAfterAdminSave = useCallback(async () => {
+    // Reconnect realtime channel dengan credentials baru
+    unsubscribe(realtimeChannelRef.current);
+    await loadData();
+    const channel = subscribeToChanges(() => loadMenu(), () => loadSettings());
+    realtimeChannelRef.current = channel;
+    setSupabaseConnected(isSupabaseReady());
+  }, [loadData, loadMenu, loadSettings]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -68,58 +100,53 @@ export const App: React.FC = () => {
     }, 3500);
   };
 
-  // Cart actions
+  // ─── Cart actions ─────────────────────────────────────────────────────
   const handleAddToCart = (item: MenuItem, variant: string) => {
     const cartItemId = `${item.id}-${variant}`;
-
     setCart((prevCart) => {
       const existing = prevCart.find((ci) => ci.id === cartItemId);
       if (existing) {
         return prevCart.map((ci) =>
           ci.id === cartItemId ? { ...ci, quantity: ci.quantity + 1 } : ci
         );
-      } else {
-        return [
-          ...prevCart,
-          {
-            id: cartItemId,
-            menuItemId: item.id,
-            name: item.name,
-            price: item.price,
-            image: item.image,
-            variant,
-            quantity: 1
-          }
-        ];
       }
+      return [
+        ...prevCart,
+        { id: cartItemId, menuItemId: item.id, name: item.name, price: item.price, image: item.image, variant, quantity: 1 }
+      ];
     });
-
     showToast(`${item.name} (${variant}) ditambahkan ke pesanan!`);
   };
 
   const handleUpdateQuantity = (id: string, newQty: number) => {
-    if (newQty <= 0) {
-      handleRemoveItem(id);
-      return;
-    }
-    setCart((prevCart) =>
-      prevCart.map((ci) => (ci.id === id ? { ...ci, quantity: newQty } : ci))
-    );
+    if (newQty <= 0) { handleRemoveItem(id); return; }
+    setCart((prev) => prev.map((ci) => ci.id === id ? { ...ci, quantity: newQty } : ci));
   };
 
-  const handleRemoveItem = (id: string) => {
-    setCart((prevCart) => prevCart.filter((ci) => ci.id !== id));
-  };
-
-  const handleClearCart = () => {
-    setCart([]);
-  };
+  const handleRemoveItem = (id: string) => setCart((prev) => prev.filter((ci) => ci.id !== id));
+  const handleClearCart = () => setCart([]);
 
   const totalCartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF7F0] text-gray-800 font-sans selection:bg-[#dfa62c] selection:text-white">
-      {/* Top Navbar */}
+      {/* Supabase status banner — tampil kalau belum terhubung (hanya info kecil) */}
+      {!isLoading && !supabaseConnected && (
+        <div className="bg-amber-500 text-white text-xs text-center py-1.5 px-4 font-medium z-50 relative">
+          ⚠️ Supabase belum terhubung — data hanya tampil lokal di perangkat ini. Login admin dan buka tab &ldquo;Supabase Backend&rdquo; untuk menghubungkan.
+        </div>
+      )}
+
+      {/* Loading Screen */}
+      {isLoading && (
+        <div className="fixed inset-0 z-50 bg-[#FAF7F0] flex flex-col items-center justify-center gap-4">
+          <div className="w-14 h-14 rounded-full bg-[#143826] text-[#dfa62c] flex items-center justify-center font-serif font-bold text-2xl animate-pulse shadow-xl">
+            LM
+          </div>
+          <p className="text-sm text-[#143826] font-medium">Memuat data terbaru…</p>
+        </div>
+      )}
+
       <Navbar
         settings={siteSettings}
         cartCount={totalCartCount}
@@ -127,31 +154,16 @@ export const App: React.FC = () => {
         onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1">
-        {/* 1. Hero Section */}
         <HeroSection settings={siteSettings} />
-
-        {/* 2. Three Value Highlights Bar */}
         <FeaturesBar settings={siteSettings} />
-
-        {/* 3. Catalog Menu Section */}
         <MenuSection items={menuItems} onAddToCart={handleAddToCart} />
-
-        {/* 4. Tentang Kami (Story & Philosophy) */}
         <AboutSection settings={siteSettings} />
-
-        {/* 5. Lokasi & Google Maps */}
         <LocationSection settings={siteSettings} />
       </main>
 
-      {/* Footer */}
-      <Footer
-        settings={siteSettings}
-        onOpenAdmin={() => setIsAdminOpen(true)}
-      />
+      <Footer settings={siteSettings} onOpenAdmin={() => setIsAdminOpen(true)} />
 
-      {/* Cart Drawer */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -163,17 +175,15 @@ export const App: React.FC = () => {
         onShowToast={showToast}
       />
 
-      {/* Hidden Admin Modal & Dashboard */}
       <AdminModal
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
         menuItems={menuItems}
         siteSettings={siteSettings}
-        onRefreshData={loadData}
+        onRefreshData={handleAfterAdminSave}
         onShowToast={showToast}
       />
 
-      {/* Toast Notification */}
       <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
     </div>
   );

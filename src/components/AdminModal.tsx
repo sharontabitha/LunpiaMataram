@@ -12,7 +12,10 @@ import {
   ShoppingBag,
   LogOut,
   Database,
-  Copy
+  Copy,
+  Wifi,
+  WifiOff,
+  AlertTriangle
 } from 'lucide-react';
 import { MenuItem, SiteSettings, OrderRecord } from '../types';
 import { formatRupiah } from '../utils/formatters';
@@ -23,7 +26,8 @@ import {
   fetchOrders,
   updateOrderStatus,
   getStoredSupabaseConfig,
-  saveStoredSupabaseConfig
+  saveStoredSupabaseConfig,
+  isSupabaseReady
 } from '../lib/supabase';
 import { ImageUploader } from './ImageUploader';
 
@@ -51,7 +55,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [authError, setAuthError] = useState('');
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'menu' | 'hero' | 'about' | 'footer' | 'orders'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'hero' | 'about' | 'footer' | 'orders' | 'supabase'>('menu');
 
   // Edit Forms State
   const [settingsForm, setSettingsForm] = useState<SiteSettings>(siteSettings);
@@ -61,6 +65,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Orders State
   const [orders, setOrders] = useState<OrderRecord[]>([]);
 
+  // Supabase Config State
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  const [dbConnected, setDbConnected] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
   useEffect(() => {
     setSettingsForm(siteSettings);
   }, [siteSettings]);
@@ -68,6 +78,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   useEffect(() => {
     if (isOpen && isAuthenticated) {
       loadOrders();
+      // Refresh koneksi status setiap kali admin modal dibuka
+      const cfg = getStoredSupabaseConfig();
+      setSupabaseUrl(cfg.url);
+      setSupabaseAnonKey(cfg.anonKey);
+      setDbConnected(isSupabaseReady());
     }
   }, [isOpen, isAuthenticated]);
 
@@ -78,46 +93,113 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Default hidden admin credentials
     if (username === 'admin' && password === 'admin123') {
       setIsAuthenticated(true);
       setAuthError('');
       onShowToast('Login Admin Berhasil!');
     } else {
-      setAuthError('Username atau password admin salah. Coba: admin / admin123');
+      setAuthError('Username atau password tidak dikenali.');
     }
   };
 
   const handleSaveSettings = async () => {
-    await updateSiteSettings(settingsForm);
+    setIsSaving(true);
+    const result = await updateSiteSettings(settingsForm);
+    setIsSaving(false);
+    if (!result.ok) {
+      onShowToast(`❌ Gagal menyimpan: ${result.error}`);
+      return;
+    }
     await onRefreshData();
-    onShowToast('Pengaturan situs berhasil diperbarui!');
+    onShowToast('✅ Pengaturan berhasil disimpan & tersinkron ke semua perangkat!');
   };
 
   const handleSaveMenuItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem) return;
-
-    await saveMenuItem(editingItem);
+    setIsSaving(true);
+    const result = await saveMenuItem(editingItem);
+    setIsSaving(false);
+    if (!result.ok) {
+      onShowToast(`❌ Gagal menyimpan menu: ${result.error}`);
+      return;
+    }
     await onRefreshData();
     setEditingItem(null);
     setIsAddingItem(false);
-    onShowToast('Menu berhasil disimpan!');
+    onShowToast('✅ Menu berhasil disimpan & tersinkron!');
   };
 
   const handleDeleteItem = async (id: string, name: string) => {
     if (confirm(`Apakah Anda yakin ingin menghapus "${name}"?`)) {
-      await deleteMenuItem(id);
+      const result = await deleteMenuItem(id);
+      if (!result.ok) {
+        onShowToast(`❌ Gagal hapus: ${result.error}`);
+        return;
+      }
       await onRefreshData();
-      onShowToast(`Menu "${name}" dihapus.`);
+      onShowToast(`🗑️ Menu "${name}" berhasil dihapus.`);
     }
   };
 
   const handleToggleAvailability = async (item: MenuItem) => {
     const updated = { ...item, available: !item.available };
-    await saveMenuItem(updated);
+    const result = await saveMenuItem(updated);
+    if (!result.ok) {
+      onShowToast(`❌ Gagal ubah stok: ${result.error}`);
+      return;
+    }
     await onRefreshData();
-    onShowToast(`Status stok "${item.name}" diubah.`);
+    onShowToast(`Status stok "${item.name}" diubah → ${updated.available ? 'Tersedia' : 'Stok Habis'}`);
+  };
+
+  const handleSaveSupabaseConfig = async () => {
+    saveStoredSupabaseConfig({ url: supabaseUrl.trim(), anonKey: supabaseAnonKey.trim() });
+    onShowToast('Konfigurasi disimpan. Menghubungkan ulang...');
+    await onRefreshData();
+    setDbConnected(isSupabaseReady());
+    if (isSupabaseReady()) {
+      onShowToast('✅ Supabase berhasil terhubung! Semua perangkat kini sinkron.');
+    } else {
+      onShowToast('❌ Koneksi gagal. Periksa URL dan Anon Key Anda.');
+    }
+  };
+
+  const copySqlSchema = () => {
+    const sql = `-- Jalankan di SQL Editor Supabase:
+CREATE TABLE IF NOT EXISTS site_settings (
+  id TEXT PRIMARY KEY DEFAULT 'current', brand_name TEXT, logo_url TEXT,
+  hero_badge TEXT, hero_title_html TEXT, hero_subtitle TEXT, hero_opening_hours TEXT,
+  hero_image TEXT, highlights JSONB, about_title TEXT, about_subtitle TEXT,
+  about_story TEXT, about_quote TEXT, about_image1 TEXT, about_image2 TEXT,
+  store_phone TEXT, store_whatsapp TEXT, gofood_url TEXT, opening_hours TEXT,
+  address TEXT, gmaps_url TEXT, gmaps_embed_url TEXT, footer_note TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS menu_items (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT DEFAULT 'Satuan',
+  badge TEXT, description TEXT, price NUMERIC DEFAULT 0, image TEXT,
+  available BOOLEAN DEFAULT TRUE, allowed_options JSONB, order_index INT DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY, customer_name TEXT, customer_phone TEXT,
+  items JSONB, total_price NUMERIC, fulfillment_type TEXT,
+  address_or_notes TEXT, status TEXT DEFAULT 'Menunggu',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE site_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_all" ON site_settings FOR ALL USING (true);
+CREATE POLICY "public_all" ON menu_items FOR ALL USING (true);
+CREATE POLICY "public_all" ON orders FOR ALL USING (true);
+
+-- Aktifkan Realtime (jalankan di Dashboard > Database > Replication)
+-- Tambahkan tabel site_settings dan menu_items ke Publication "supabase_realtime"
+`;
+    navigator.clipboard.writeText(sql);
+    onShowToast('Skrip SQL disalin ke clipboard!');
   };
 
   if (!isOpen) return null;
@@ -284,6 +366,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               >
                 <ShoppingBag className="w-4 h-4 text-[#dfa62c]" />
                 <span>Log Pesanan ({orders.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('supabase')}
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                  activeTab === 'supabase'
+                    ? 'bg-[#143826] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Database className="w-4 h-4 text-[#dfa62c]" />
+                <span>Supabase Backend</span>
+                {dbConnected
+                  ? <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto flex-shrink-0"></span>
+                  : <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse ml-auto flex-shrink-0"></span>}
               </button>
             </div>
 
@@ -1022,6 +1119,80 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* TAB 6: SUPABASE BACKEND */}
+              {activeTab === 'supabase' && (
+                <div className="space-y-6">
+                  <div>
+                    <h4 className="font-serif font-bold text-xl text-[#143826]">Integrasi Backend Supabase</h4>
+                    <p className="text-xs text-gray-500">Hubungkan website langsung ke database cloud Supabase untuk sinkronisasi realtime multi-perangkat.</p>
+                  </div>
+
+                  {/* Status indicator */}
+                  <div className={`p-4 rounded-2xl flex items-center justify-between gap-3 ${dbConnected ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
+                    <div>
+                      <span className="text-xs text-gray-500 block">Status Koneksi Database:</span>
+                      <span className={`font-semibold text-sm flex items-center gap-1.5 mt-0.5 ${dbConnected ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dbConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                        {dbConnected ? 'Tersambung ke Supabase ✓' : 'Belum terhubung — data hanya lokal di perangkat ini'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={copySqlSchema}
+                      className="px-3.5 py-2 bg-[#dfa62c] text-[#0e2b1d] rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-[#c99527] flex-shrink-0"
+                    >
+                      <Copy className="w-4 h-4" />
+                      <span>Salin Schema SQL</span>
+                    </button>
+                  </div>
+
+                  {/* Credentials form */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">Supabase Project URL</label>
+                      <input
+                        type="url"
+                        placeholder="https://xyzcompany.supabase.co"
+                        value={supabaseUrl}
+                        onChange={(e) => setSupabaseUrl(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#143826]/20 focus:border-[#143826]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">
+                        Supabase Anon / Public Key <span className="font-normal text-gray-400">(dimulai dengan eyJ...)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        value={supabaseAnonKey}
+                        onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                        className="w-full px-3 py-2 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#143826]/20 focus:border-[#143826]"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleSaveSupabaseConfig}
+                        className="px-6 py-2.5 bg-[#143826] hover:bg-[#0e2b1d] text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-md"
+                      >
+                        <Save className="w-4 h-4 text-[#dfa62c]" />
+                        <span>Simpan &amp; Hubungkan Supabase</span>
+                      </button>
+                    </div>
+
+                    <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 text-xs text-gray-600 space-y-2">
+                      <p className="font-bold text-gray-800">Petunjuk Menyiapkan Supabase:</p>
+                      <ol className="list-decimal pl-4 space-y-1.5">
+                        <li>Buka <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-emerald-700 underline font-medium">supabase.com</a> dan buat project baru.</li>
+                        <li>Masuk ke menu <strong>SQL Editor</strong>, klik <strong>New Query</strong>.</li>
+                        <li>Klik tombol <strong>"Salin Schema SQL"</strong> di atas lalu tempel dan tekan Run di Supabase.</li>
+                        <li>Aktifkan Realtime: <strong>Dashboard → Database → Replication</strong> → tambahkan tabel <code className="bg-gray-200 px-1 rounded">site_settings</code> dan <code className="bg-gray-200 px-1 rounded">menu_items</code>.</li>
+                        <li>Buka <strong>Project Settings → API</strong>, salin <strong>Project URL</strong> dan <strong>anon/public API key</strong> ke form di atas, lalu klik Simpan.</li>
+                      </ol>
+                    </div>
+                  </div>
                 </div>
               )}
 
