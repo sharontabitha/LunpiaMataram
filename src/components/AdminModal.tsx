@@ -1162,11 +1162,11 @@ CREATE POLICY "public_all" ON orders FOR ALL USING (true);
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-700 block mb-1">
-                        Supabase Anon / Public Key <span className="font-normal text-gray-400">(dimulai dengan eyJ...)</span>
+                        Supabase Anon / Public Key <span className="font-normal text-gray-400">(format eyJ... atau sb_publishable_...)</span>
                       </label>
                       <textarea
                         rows={3}
-                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        placeholder="eyJhbGciOiJIUzI1Ni... atau sb_publishable_..."
                         value={supabaseAnonKey}
                         onChange={(e) => setSupabaseAnonKey(e.target.value)}
                         className="w-full px-3 py-2 border rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#143826]/20 focus:border-[#143826]"

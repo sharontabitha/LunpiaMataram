@@ -58,8 +58,13 @@ let activeSupabaseClient: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   const config = getStoredSupabaseConfig();
-  // Validasi: URL harus berupa https://xxx.supabase.co, key harus JWT (mulai eyJ)
-  if (!config.url || !config.anonKey || !config.anonKey.startsWith('eyJ')) {
+  // Validasi: URL harus valid, key harus valid (format JWT eyJ... atau format baru sb_publishable_...)
+  const isValidKey =
+    Boolean(config.anonKey) &&
+    !config.anonKey.startsWith('http') &&
+    (config.anonKey.startsWith('eyJ') || config.anonKey.startsWith('sb_') || config.anonKey.length > 20);
+
+  if (!config.url || !isValidKey) {
     return null;
   }
   try {
