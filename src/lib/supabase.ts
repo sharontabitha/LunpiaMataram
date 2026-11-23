@@ -13,26 +13,38 @@ export interface SupabaseConfig {
 
 // ─── KONFIGURASI SUPABASE ────────────────────────────────────────────────────
 
+function isValidAnonKey(key: string): boolean {
+  if (!key || key.startsWith('http')) return false;
+  return key.startsWith('eyJ') || key.startsWith('sb_') || key.length > 20;
+}
+
 export function getStoredSupabaseConfig(): SupabaseConfig {
-  // Prioritas 1: localStorage (diisi dari panel admin)
+  // Prioritas 1: environment variables (.env) yang valid
+  const envUrl = normalizeUrl((import.meta.env.VITE_SUPABASE_URL || '').trim());
+  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+  if (envUrl && envKey && isValidAnonKey(envKey)) {
+    return { url: envUrl, anonKey: envKey };
+  }
+
+  // Prioritas 2: localStorage (jika admin mengisi manual di browser)
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_SUPABASE_CONFIG_KEY);
     if (saved) {
       const parsed = JSON.parse(saved) as SupabaseConfig;
-      if (parsed.url && parsed.anonKey) {
+      if (parsed.url && parsed.anonKey && isValidAnonKey(parsed.anonKey)) {
         return {
           url: normalizeUrl(parsed.url),
           anonKey: parsed.anonKey.trim()
         };
+      } else {
+        // Hapus konfigurasi lama yang rusak jika ada
+        localStorage.removeItem(LOCAL_STORAGE_SUPABASE_CONFIG_KEY);
       }
     }
   } catch (e) {
     console.error('Error reading supabase config from storage', e);
   }
-
-  // Prioritas 2: environment variables (.env)
-  const envUrl = normalizeUrl((import.meta.env.VITE_SUPABASE_URL || '').trim());
-  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
   return { url: envUrl, anonKey: envKey };
 }
@@ -58,13 +70,7 @@ let activeSupabaseClient: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   const config = getStoredSupabaseConfig();
-  // Validasi: URL harus valid, key harus valid (format JWT eyJ... atau format baru sb_publishable_...)
-  const isValidKey =
-    Boolean(config.anonKey) &&
-    !config.anonKey.startsWith('http') &&
-    (config.anonKey.startsWith('eyJ') || config.anonKey.startsWith('sb_') || config.anonKey.length > 20);
-
-  if (!config.url || !isValidKey) {
+  if (!config.url || !isValidAnonKey(config.anonKey)) {
     return null;
   }
   try {
